@@ -1,0 +1,40 @@
+---
+- name: Install netcat package
+  package:
+    name: "{{ netcat_package }}"
+    state: present
+  vars:
+    netcat_package: "{{ 'netcat-openbsd' if ansible_os_family == 'Debian' else 'nmap-ncat' }}"
+
+- name: Create netcat service user group
+  group:
+    name: "{{ netcat_group }}"
+    state: present
+
+- name: Ensure service user exists
+  user:
+    name: "{{ netcat_user }}"
+    group: "{{ netcat_group }}"
+    system: yes
+    shell: /bin/false
+    home: /var/lib/netcat
+    create_home: no
+    state: present
+
+- name: Create systemd service file
+  template:
+    src: netcat.service.j2
+    dest: /etc/systemd/system/netcat-{{ netcat_port }}.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: 
+    - reload systemd
+    - restart netcat service
+
+- name: Start and enable netcat service
+  systemd:
+    name: "netcat-{{ netcat_port }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes

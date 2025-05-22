@@ -1,0 +1,14 @@
+---
+# Site1 specific variables
+docker_users:
+  - user1
+  - user2
+  - user3
+  - user4
+
+packages_to_install:
+  - docker.io
+  - docker-compose
+  - git
+  - curl
+  - wget
