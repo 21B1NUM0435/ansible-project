@@ -1,0 +1,108 @@
+---
+- name: Create netcat listening service on all hosts
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - ../vars/main.yml
+    
+  tasks:
+    - name: Install netcat if not present
+      apt:
+        name: netcat-openbsd
+        state: present
+        update_cache: yes
+        
+    - name: Ensure user exists and has proper shell
+      user:
+        name: "{{ ansible_user }}"
+        state: present
+        shell: /bin/bash
+        
+    - name: Create .ansible directory for user (fix tmp directory issue)
+      file:
+        path: "/home/{{ ansible_user }}/.ansible/tmp"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+        recurse: yes
+        
+    - name: Stop any existing netcat service
+      systemd:
+        name: "netcat-{{ ansible_user }}"
+        state: stopped
+      ignore_errors: yes
+        
+    - name: Create netcat systemd service file
+      template:
+        src: ../templates/netcat.service.j2
+        dest: "/etc/systemd/system/netcat-{{ ansible_user }}.service"
+        owner: root
+        group: root
+        mode: '0644'
+      register: service_file_created
+      
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+      when: service_file_created.changed
+      
+    - name: Enable and start netcat service
+      systemd:
+        name: "netcat-{{ ansible_user }}"
+        enabled: yes
+        state: started
+      register: service_started
+      
+    - name: Wait for service to start properly
+      pause:
+        seconds: 5
+        
+    - name: Check service status
+      systemd:
+        name: "netcat-{{ ansible_user }}"
+      register: service_status
+      
+    - name: Display service status
+      debug:
+        msg: "Service {{ service_status.name }} is {{ service_status.status.ActiveState }}"
+        
+    - name: Check if port is listening (without failing)
+      shell: ss -tlnp | grep :{{ netcat_service_port }}
+      register: port_check
+      changed_when: false
+      failed_when: false
+      
+    - name: Display port status
+      debug:
+        msg: |
+          Port {{ netcat_service_port }} status:
+          {% if port_check.rc == 0 %}
+          ✅ LISTENING: {{ port_check.stdout }}
+          {% else %}
+          ❌ NOT LISTENING - Service may need troubleshooting
+          {% endif %}
+          
+    - name: Test netcat service locally (without failing)
+      shell: |
+        timeout 2 bash -c "echo 'test_message' | nc localhost {{ netcat_service_port }}" || echo "Service may not be responding to connections"
+      register: nc_test
+      changed_when: false
+      failed_when: false
+      
+    - name: Verify service will start on boot
+      shell: systemctl is-enabled netcat-{{ ansible_user }}
+      register: service_enabled_check
+      changed_when: false
+      
+    - name: Final service summary
+      debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          Service: netcat-{{ ansible_user }}
+          Status: {{ service_status.status.ActiveState }}
+          Port: {{ netcat_service_port }}
+          User: {{ ansible_user }}
+          Auto-start: {{ service_enabled_check.stdout }}
+          Port Check: {% if port_check.rc == 0 %}✅ Listening{% else %}❌ Not Listening{% endif %}

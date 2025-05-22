@@ -1,0 +1,96 @@
+---
+- name: Install Docker and Git on site1 hosts
+  hosts: site1
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - ../vars/main.yml
+    
+  tasks:
+    - name: Install prerequisite packages
+      apt:
+        name: "{{ debian_packages }}"
+        state: present
+        update_cache: yes
+        
+    - name: Add Docker GPG apt key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+        
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        
+    - name: Install Docker CE and Git
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+          - git
+        state: present
+        update_cache: yes
+        
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+        
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+      register: user_added_to_docker
+      
+    - name: Verify Git installation
+      command: git --version
+      register: git_version
+      changed_when: false
+      
+    - name: Verify Docker installation
+      command: docker --version
+      register: docker_version
+      changed_when: false
+      
+    - name: Display installation results
+      debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          Git version: {{ git_version.stdout }}
+          Docker version: {{ docker_version.stdout }}
+          User added to docker group: {{ user_added_to_docker.changed }}
+          
+    - name: Reboot to apply group membership
+      reboot:
+        msg: "Reboot initiated to apply docker group membership"
+        connect_timeout: 5
+        reboot_timeout: 600
+        pre_reboot_delay: 0
+        post_reboot_delay: 30
+        test_command: whoami
+      when: user_added_to_docker.changed
+      
+    - name: Wait for system to become reachable after reboot
+      wait_for_connection:
+        connect_timeout: 20
+        sleep: 5
+        delay: 5
+        timeout: 300
+      when: user_added_to_docker.changed
+      
+    - name: Test Docker access without sudo
+      command: docker ps
+      become: no
+      register: docker_test
+      changed_when: false
+      failed_when: false
+      
+    - name: Confirm Docker group membership
+      debug:
+        msg: "Docker is accessible without sudo: {{ docker_test.rc == 0 }}"

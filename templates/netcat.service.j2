@@ -1,0 +1,18 @@
+[Unit]
+Description=Netcat listener on port {{ netcat_service_port }}
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User={{ ansible_user }}
+Group={{ ansible_user }}
+ExecStart=/usr/bin/nc -l -k -p {{ netcat_service_port }}
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

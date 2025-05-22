@@ -1,0 +1,119 @@
+---
+- name: Setup Vagrant VM on first site2 host (with cleanup)
+  hosts: site2[0]  # Only first host in site2 group (host5)
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - ../vars/main.yml
+    
+  vars:
+    vagrant_dir: "/home/{{ ansible_user }}/nested-vagrant-vm"
+    ansible_ssh_public_key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+    
+  tasks:
+    - name: Ensure Vagrant and VirtualBox are installed
+      apt:
+        name:
+          - virtualbox
+          - vagrant
+        state: present
+        update_cache: yes
+        
+    - name: Create vagrant directory
+      file:
+        path: "{{ vagrant_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+        
+    - name: Kill any existing Vagrant processes
+      shell: |
+        pkill -f vagrant || true
+        pkill -f ruby || true
+        pkill -f VBoxHeadless || true
+      become: yes
+      ignore_errors: yes
+      
+    - name: Clean up any existing Vagrant environment
+      shell: |
+        cd {{ vagrant_dir }}
+        vagrant destroy -f || true
+        rm -rf .vagrant/
+      become_user: "{{ ansible_user }}"
+      ignore_errors: yes
+      
+    - name: Remove any orphaned VirtualBox VMs
+      shell: |
+        vboxmanage list vms | grep nested | cut -d' ' -f1 | tr -d '"' | while read vm; do
+          vboxmanage unregistervm "$vm" --delete || true
+        done
+      become_user: "{{ ansible_user }}"
+      ignore_errors: yes
+      
+    - name: Generate SSH key pair if not exists
+      user:
+        name: "{{ ansible_user }}"
+        generate_ssh_key: yes
+        ssh_key_bits: 2048
+        ssh_key_file: /home/{{ ansible_user }}/.ssh/id_rsa
+      become_user: "{{ ansible_user }}"
+      
+    - name: Read public key content
+      slurp:
+        src: "/home/{{ ansible_user }}/.ssh/id_rsa.pub"
+      register: ssh_public_key_content
+      become_user: "{{ ansible_user }}"
+      
+    - name: Generate Vagrantfile from template
+      template:
+        src: ../templates/Vagrantfile.j2
+        dest: "{{ vagrant_dir }}/Vagrantfile"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+      vars:
+        ansible_ssh_public_key: "{{ ssh_public_key_content.content | b64decode | trim }}"
+        
+    - name: Wait before starting VM
+      pause:
+        seconds: 5
+        
+    - name: Start nested Vagrant VM
+      shell: |
+        cd {{ vagrant_dir }}
+        vagrant up --no-parallel
+      register: vagrant_up_result
+      become_user: "{{ ansible_user }}"
+      timeout: 1200  # 20 minutes timeout
+      
+    - name: Get nested VM SSH configuration
+      shell: |
+        cd {{ vagrant_dir }}
+        vagrant ssh-config
+      register: ssh_config
+      become_user: "{{ ansible_user }}"
+      changed_when: false
+      
+    - name: Test SSH connection to nested VM
+      shell: |
+        cd {{ vagrant_dir }}
+        vagrant ssh -c "hostname && whoami && free -h"
+      register: ssh_test
+      become_user: "{{ ansible_user }}"
+      changed_when: false
+      
+    - name: Display nested VM information
+      debug:
+        msg: |
+          ✅ Nested Vagrant VM successfully created!
+          📊 VM Specifications:
+            - RAM: {{ (ansible_memtotal_mb * vagrant_vm_memory_percent / 100) | int }} MB ({{ vagrant_vm_memory_percent }}% of {{ ansible_memtotal_mb }} MB)
+            - CPUs: {{ vagrant_vm_cores }}
+            - SSH Port: 2222 (forwarded)
+          🔧 Access: vagrant ssh (from {{ vagrant_dir }})
+          📝 SSH Config:
+          {{ ssh_config.stdout }}
+          
+          🧪 Test Results:
+          {{ ssh_test.stdout }}

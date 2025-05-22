@@ -1,9 +1,0 @@
----
-- name: reload systemd
-  systemd:
-    daemon_reload: yes
-
-- name: restart netcat service
-  systemd:
-    name: "netcat-{{ netcat_port }}"
-    state: restarted

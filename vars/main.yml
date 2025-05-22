@@ -1,0 +1,18 @@
+---
+# Common variables
+netcat_service_port: 9090
+vagrant_vm_cores: 2
+vagrant_vm_memory_percent: 50
+
+# Docker configuration
+docker_users:
+  - "{{ ansible_user }}"
+
+# Package lists
+debian_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - netcat-openbsd
